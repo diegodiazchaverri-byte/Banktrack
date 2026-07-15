@@ -278,6 +278,8 @@ nav svg{width:23px; height:23px}
 // ---------- Constantes ----------
 const CATEGORIAS = ['Comida','Transporte','Ropa','Supermercado','Entretenimiento','Casa',
   'Regalos','Viaje','Educación','Deporte','Trabajo','Salud','Ingresos','Otros','Indefinido'];
+// Categorías vigentes: las que manda el API (base + personalizadas del usuario)
+function CATS(){ return (data && data.categorias && data.categorias.length) ? data.categorias : CATEGORIAS; }
 
 // Mapa fijo categoría → slot de color (paleta validada; nunca se cicla:
 // las categorías sin slot van en gris y se agrupan como "Otras" en la dona)
@@ -294,7 +296,7 @@ const CAT_EMOJI = {
 const LS_CFG = 'bt_config', LS_DATA = 'bt_data';
 
 // ---------- Estado ----------
-let cfg = leerLS(LS_CFG) || { url:'', token:'', theme:'auto' };
+let cfg = leerLS(LS_CFG) || { url:'', token:'', theme:'auto', moneda:'CRC' };
 let data = leerLS(LS_DATA) || null;       // {tx, presupuestos, metas, ts}
 let mesSel = mesKey(new Date());          // 'YYYY-MM' seleccionado
 let filtroCat = '', filtroTxt = '';
@@ -308,7 +310,13 @@ const demo = () => !cfg.url || !cfg.token;
 
 // ---------- Formato ----------
 const fmtCRC = new Intl.NumberFormat('es-CR',{style:'currency',currency:'CRC',maximumFractionDigits:0});
-const crc = n => fmtCRC.format(Math.round(n));
+const fmtUSD = new Intl.NumberFormat('es-CR',{style:'currency',currency:'USD',maximumFractionDigits:2});
+const tcActual = () => (data && data.tc) || 505;
+// Formatea cualquier monto (internamente todo está en colones) en la moneda de vista
+function crc(n){
+  if (cfg.moneda === 'USD') return fmtUSD.format(n / tcActual());
+  return fmtCRC.format(Math.round(n));
+}
 function mesKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
 function mesNombre(mk, corto){
   const [y,m] = mk.split('-').map(Number);
@@ -327,12 +335,12 @@ const txs = () => (data && data.tx) || [];
 function txDelMes(mk){ return txs().filter(t => mesKey(new Date(t.f)) === mk); }
 function gastosPorCat(mk){
   const out = {};
-  txDelMes(mk).forEach(t => { if (t.cat !== 'Ingresos') out[t.cat] = (out[t.cat]||0) + t.m; });
+  txDelMes(mk).forEach(t => { if (!t.aj && t.cat !== 'Ingresos') out[t.cat] = (out[t.cat]||0) + t.m; });
   return out;
 }
 function totales(mk){
   let g = 0, i = 0;
-  txDelMes(mk).forEach(t => { if (t.cat === 'Ingresos') i += t.m; else g += t.m; });
+  txDelMes(mk).forEach(t => { if (t.aj) return; if (t.cat === 'Ingresos') i += t.m; else g += t.m; });
   return { gastos:g, ingresos:i };
 }
 function listaMeses(){
@@ -395,17 +403,34 @@ function demoApi(action, p){
   if (action === 'updateCategory'){
     const t = data.tx.find(x => x.fila === p.fila); let otras = 0;
     if (t){ t.cat = p.categoria;
-      data.tx.forEach(x => { if (x !== t && x.c === t.c && x.cat === 'Indefinido'){ x.cat = p.categoria; otras++; } }); }
+      if (!p.soloEstaVez)
+        data.tx.forEach(x => { if (x !== t && x.c === t.c && x.cat === 'Indefinido'){ x.cat = p.categoria; otras++; } }); }
     guardarLS(LS_DATA, data);
-    return { ok:true, otrasActualizadas: otras };
+    return { ok:true, otrasActualizadas: otras, puntual: !!p.soloEstaVez };
+  }
+  if (action === 'addCategory'){
+    if (!data.categorias) data.categorias = CATEGORIAS.slice();
+    if (!data.categorias.some(c => c.toLowerCase() === p.nombre.toLowerCase())) data.categorias.push(p.nombre);
+    guardarLS(LS_DATA, data);
+    return { ok:true, categorias: data.categorias };
   }
   if (action === 'addTransaction'){
+    const esUsd = p.moneda === 'USD';
     data.tx.push({ fila: 9000 + data.tx.length, f: p.f || Date.now(), t: 'MANUAL',
-      c: p.c, cat: p.categoria, m: p.m, n: p.n || '' });
+      c: p.c, cat: p.categoria, m: esUsd ? Math.round(p.m * tcActual()) : p.m,
+      n: p.n || '', mo: esUsd ? 'USD' : undefined, m0: esUsd ? p.m : undefined });
     guardarLS(LS_DATA, data); return { ok:true };
   }
   if (action === 'saveBudgets'){ data.presupuestos = p.items; guardarLS(LS_DATA, data); return { ok:true }; }
   if (action === 'saveGoals'){ data.metas = p.items; guardarLS(LS_DATA, data); return { ok:true }; }
+  if (action === 'setBalance'){
+    const bal = Math.round(data.tx.reduce((s,t) => s + (t.aj ? t.m : (t.cat === 'Ingresos' ? t.m : -t.m)), 0));
+    const ajuste = Math.round(p.saldo) - bal;
+    if (ajuste !== 0) data.tx.push({ fila: 9500 + data.tx.length, f: Date.now(), t: 'AJUSTE',
+      c: 'Ajuste de saldo', cat: 'Otros', m: ajuste, n: '', aj: true });
+    guardarLS(LS_DATA, data);
+    return { ok:true, ajuste, balance: Math.round(p.saldo) };
+  }
   if (action === 'ping') return { ok:true, pong:true };
   return { ok:false, error:'demo' };
 }
@@ -416,7 +441,7 @@ function generarDemo(){
     ['AUTOMERCADO','Supermercado',22000,9],['WALMART','Supermercado',34000,5],
     ['UBER','Transporte',3800,12],['GASOLINERA DELTA','Transporte',25000,3],
     ['MCDONALDS','Comida',6500,6],['SODA TICA','Comida',4200,8],
-    ['NETFLIX','Entretenimiento',7000,1],['SPOTIFY','Entretenimiento',3500,1],
+    ['SPOTIFY','Entretenimiento',3500,1],
     ['FARMACIA FISCHEL','Salud',12000,2],['EPA','Casa',18000,1],
     ['UDEMY','Educación',9000,1],['SMART FIT','Deporte',18500,1],
     ['TIENDA ARENAS','Ropa',25000,1],['KIOSKO ARTESANAL','Indefinido',8000,2]
@@ -433,6 +458,10 @@ function generarDemo(){
           t:'COMPRA', c, cat, m: Math.round(monto * variacion), n:'' });
       }
     });
+    // Suscripción pagada en dólares (como una tarjeta USD real)
+    tx.push({ fila: fila++, f: new Date(base.getFullYear(), base.getMonth(), 3, 12).getTime(),
+      t:'COMPRA', c:'NETFLIX', cat:'Entretenimiento', m: Math.round(13.99 * 505), n:'',
+      mo:'USD', m0: 13.99 });
     tx.push({ fila: fila++, f: new Date(base.getFullYear(), base.getMonth(), 1, 9).getTime(),
       t:'TRANSFERENCIA', c:'SALARIO', cat:'Ingresos', m: 850000, n:'' });
     if (m % 2 === 0 && (m > 0 || hoy.getDate() >= 15))
@@ -444,7 +473,13 @@ function generarDemo(){
     presupuestos: [ {cat:'Comida', limite:90000}, {cat:'Supermercado', limite:260000},
                     {cat:'Transporte', limite:120000}, {cat:'Entretenimiento', limite:25000} ],
     metas: [ {nombre:'Viaje a Panamá', objetivo:500000,
-              inicio:new Date(hoy.getFullYear(), hoy.getMonth()-3, 1).getTime(), nota:'Diciembre'} ],
+              inicio:new Date(hoy.getFullYear(), hoy.getMonth()-3, 1).getTime(), nota:'Diciembre',
+              aporteTipo:'monto', aporteValor:60000, periodo:'mes'},
+             {nombre:'Fondo de emergencia', objetivo:1000000,
+              inicio:new Date(hoy.getFullYear(), hoy.getMonth()-4, 1).getTime(), nota:'',
+              aporteTipo:'pct', aporteValor:15, periodo:'mes'} ],
+    categorias: CATEGORIAS.slice(),
+    tc: 505,
     ts: Date.now()
   };
   guardarLS(LS_DATA, data);
@@ -725,12 +760,23 @@ function renderLista(){
     let dia = difDias === 0 ? 'Hoy' : difDias === 1 ? 'Ayer' :
       d.toLocaleDateString('es-CR',{weekday:'long', day:'numeric', month:'short'});
     if (dia !== diaPrev){ html += `<div class="dayhead">${dia}</div>`; diaPrev = dia; }
+    if (t.aj){
+      // Ajuste de saldo: visible pero no editable, con su signo
+      html += `<div class="tx" style="opacity:.75">
+        <div class="ic">⚖️</div>
+        <div class="mid"><div class="who">Ajuste de saldo</div>
+          <span class="catchip">Solo afecta el balance</span></div>
+        <div class="amt num">${t.m >= 0 ? '+' : ''}${crc(t.m)}</div>
+      </div>`;
+      return;
+    }
     const esIn = t.cat === 'Ingresos';
     html += `<div class="tx" onclick="abrirTx(${t.fila})">
       <div class="ic">${CAT_EMOJI[t.cat] || '📦'}</div>
       <div class="mid">
         <div class="who">${esc(t.c)}</div>
         <span class="catchip ${t.cat==='Indefinido'?'indef':''}">${esc(t.cat)}</span>
+        ${t.mo === 'USD' ? `<span class="catchip">💵 $${Number(t.m0).toFixed(2)}</span>` : ''}
       </div>
       <div class="amt num ${esIn?'in':''}">${esIn?'+':''}${crc(t.m)}</div>
     </div>`;
@@ -742,12 +788,14 @@ function renderLista(){
 function abrirTx(fila){
   const t = txs().find(x => x.fila === fila);
   if (!t) return;
-  const grid = CATEGORIAS.map(c =>
-    `<button class="${t.cat===c?'on':''}" onclick="cambiarCategoria(${fila}, '${esc(c)}')">${esc(c)}</button>`).join('');
+  const grid = CATS().map(c =>
+    `<button class="${t.cat===c?'on':''}" onclick="elegirCategoria(${fila}, '${esc(c)}')">${esc(c)}</button>`).join('') +
+    `<button style="color:var(--accent)" onclick="crearCategoria(${fila})">＋ Nueva…</button>`;
   abrirSheet(`
     <h2>${esc(t.c)}</h2>
     <div style="color:var(--ink2); font-size:14px; margin:-6px 0 4px" class="num">
-      ${crc(t.m)} · ${new Date(t.f).toLocaleDateString('es-CR',{day:'numeric',month:'long',year:'numeric'})}
+      ${crc(t.m)}${t.mo === 'USD' ? ' (pagado $' + Number(t.m0).toFixed(2) + ')' : ''}
+      · ${new Date(t.f).toLocaleDateString('es-CR',{day:'numeric',month:'long',year:'numeric'})}
       ${t.t ? ' · ' + esc(t.t) : ''}</div>
     ${t.n ? `<div style="color:var(--muted); font-size:13px; margin-bottom:6px">📝 ${esc(t.n)}</div>` : ''}
     <div class="field" style="margin-top:14px"><label>Categoría</label></div>
@@ -755,19 +803,53 @@ function abrirTx(fila){
   `);
 }
 
-async function cambiarCategoria(fila, categoria){
+/** Paso 2: elegir el alcance — solo esta compra, o siempre para este comercio. */
+function elegirCategoria(fila, categoria){
+  const t = txs().find(x => x.fila === fila);
+  if (!t || t.cat === categoria){ cerrarSheet(); return; }
+  if (categoria === 'Ingresos' || categoria === 'Indefinido'){
+    cambiarCategoria(fila, categoria, true); return; // sin regla de cadena para estas
+  }
+  abrirSheet(`
+    <h2>${esc(categoria)}</h2>
+    <div style="color:var(--ink2); font-size:14px; margin:-4px 0 16px">
+      ¿Aplicar a <b>${esc(t.c)}</b>…</div>
+    <button class="btn" onclick="cambiarCategoria(${fila}, '${esc(categoria)}', false)">
+      Siempre — cada compra aquí será ${esc(categoria)}</button>
+    <button class="btn ghost" style="margin-top:10px" onclick="cambiarCategoria(${fila}, '${esc(categoria)}', true)">
+      Solo esta compra</button>
+    <button class="btn ghost" style="margin-top:10px; border:none; color:var(--muted)"
+      onclick="abrirTx(${fila})">‹ Volver</button>
+  `);
+}
+
+async function crearCategoria(fila){
+  const nombre = (window.prompt('Nombre de la nueva categoría:') || '').trim();
+  if (!nombre) return;
+  try {
+    const r = await api('addCategory', { nombre });
+    if (r.categorias) data.categorias = r.categorias;
+    guardarLS(LS_DATA, data);
+    toast('✓ Categoría creada');
+    if (fila) abrirTx(fila); else render();
+  } catch (e) { toast('✕ ' + e.message); }
+}
+
+async function cambiarCategoria(fila, categoria, soloEstaVez){
   const t = txs().find(x => x.fila === fila);
   if (!t || t.cat === categoria){ cerrarSheet(); return; }
   const catAnterior = t.cat;
   t.cat = categoria; // actualización optimista
   cerrarSheet(); render();
   try {
-    const r = await api('updateCategory', { fila: t.fila, f: t.f, c: t.c, m: t.m, categoria });
-    if (r.otrasActualizadas > 0){
+    const r = await api('updateCategory', { fila: t.fila, f: t.f, c: t.c, m: t.m, categoria, soloEstaVez: !!soloEstaVez });
+    if (soloEstaVez){
+      toast('✓ Solo esta compra quedó como ' + categoria);
+    } else if (r.otrasActualizadas > 0){
       txs().forEach(x => { if (x.c === t.c && x.cat === 'Indefinido') x.cat = categoria; });
       render();
-      toast(`✓ Guardado (+ ${r.otrasActualizadas} del mismo comercio)`);
-    } else toast('✓ Categoría guardada');
+      toast(`✓ Regla creada (+ ${r.otrasActualizadas} del mismo comercio)`);
+    } else toast('✓ Regla creada para ' + t.c);
     guardarLS(LS_DATA, data);
   } catch (e) {
     t.cat = catAnterior; render();
@@ -777,15 +859,20 @@ async function cambiarCategoria(fila, categoria){
 
 // --- Nueva transacción manual ---
 function abrirNuevaTx(){
-  const cats = CATEGORIAS.filter(c => c !== 'Ingresos' && c !== 'Indefinido');
+  const cats = CATS().filter(c => c !== 'Ingresos' && c !== 'Indefinido');
   abrirSheet(`
     <h2>Registrar movimiento</h2>
     <div class="seg" style="margin-bottom:14px" id="segTipo">
       <button class="on" style="flex:1" onclick="segNuevo(this,'gasto')">💸 Gasto</button>
       <button style="flex:1" onclick="segNuevo(this,'ingreso')">💰 Ingreso</button>
     </div>
-    <div class="field"><label>Monto (₡)</label>
-      <input id="nMonto" type="number" inputmode="numeric" min="1" placeholder="5000"></div>
+    <div class="field"><label>Moneda</label>
+      <div class="seg" id="segMoneda">
+        <button style="flex:1" class="on" onclick="segMonedaTx(this,'CRC')">₡ Colones</button>
+        <button style="flex:1" onclick="segMonedaTx(this,'USD')">$ Dólares</button>
+      </div></div>
+    <div class="field"><label id="lblMontoTx">Monto (₡)</label>
+      <input id="nMonto" type="number" inputmode="decimal" min="0.01" step="any" placeholder="5000"></div>
     <div class="field"><label>Descripción / comercio</label>
       <input id="nComercio" placeholder="Ej: Feria del agricultor"></div>
     <div class="field" id="fCat"><label>Categoría</label>
@@ -796,11 +883,17 @@ function abrirNuevaTx(){
     <button class="btn" onclick="guardarNuevaTx()">Guardar</button>
   `);
 }
-let nuevoTipo = 'gasto';
+let nuevoTipo = 'gasto', nuevaMoneda = 'CRC';
 function segNuevo(btn, tipo){
   nuevoTipo = tipo;
   btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
   document.getElementById('fCat').style.display = tipo === 'ingreso' ? 'none' : '';
+}
+function segMonedaTx(btn, moneda){
+  nuevaMoneda = moneda;
+  btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
+  document.getElementById('lblMontoTx').textContent = moneda === 'USD' ? 'Monto ($)' : 'Monto (₡)';
+  document.getElementById('nMonto').placeholder = moneda === 'USD' ? '20.00' : '5000';
 }
 async function guardarNuevaTx(){
   const m = Number(document.getElementById('nMonto').value);
@@ -811,8 +904,9 @@ async function guardarNuevaTx(){
   const f = fechaStr ? new Date(fechaStr + 'T12:00:00').getTime() : Date.now();
   cerrarSheet();
   try {
-    await api('addTransaction', { m, c, categoria, f, n: document.getElementById('nNota') ? document.getElementById('nNota').value : '' });
-    toast('✓ Movimiento registrado');
+    await api('addTransaction', { m, c, categoria, f, moneda: nuevaMoneda,
+      n: document.getElementById('nNota') ? document.getElementById('nNota').value : '' });
+    toast('✓ Movimiento registrado' + (nuevaMoneda === 'USD' ? ' ($' + m.toFixed(2) + ')' : ''));
     await sync();
   } catch (e) { toast('✕ ' + e.message); }
 }
@@ -840,7 +934,7 @@ function renderPres(){
 function editarPresupuesto(cat){
   const pres = data.presupuestos || [];
   const actual = pres.find(p => p.cat === cat);
-  const cats = CATEGORIAS.filter(c => c !== 'Ingresos');
+  const cats = CATS().filter(c => c !== 'Ingresos');
   abrirSheet(`
     <h2>${actual ? 'Editar' : 'Nuevo'} presupuesto</h2>
     <div class="field"><label>Categoría</label>
@@ -873,35 +967,92 @@ async function persistirPresupuestos(items){
 // ================================================================
 // VISTA: METAS
 // ================================================================
+// Los ajustes de saldo (t.aj) entran con su signo tal cual; el resto según categoría
+function impactoBalance(t){ return t.aj ? t.m : (t.cat === 'Ingresos' ? t.m : -t.m); }
 function ahorroDesde(inicioMs){
   let s = 0;
-  txs().forEach(t => { if (t.f >= inicioMs) s += (t.cat === 'Ingresos' ? t.m : -t.m); });
+  txs().forEach(t => { if (t.f >= inicioMs) s += impactoBalance(t); });
   return s;
+}
+function balanceEntre(a, b){
+  let s = 0;
+  txs().forEach(t => { if (t.f >= a && t.f < b) s += impactoBalance(t); });
+  return s;
+}
+/**
+ * Progreso de una meta:
+ * - Sin aporte configurado: balance acumulado (ingresos − gastos) desde el inicio.
+ * - Con aporte: por cada período COMPLETO desde el inicio se "mete al sobre"
+ *   un monto fijo (₡) o un % del balance de ese período (nunca más de lo que sobró).
+ */
+/** Próximo corte del período: semana (7 días), quincena (día 1 y 16) o mes. */
+function siguienteCorte(t, periodo){
+  if (periodo === 'semana') return new Date(t.getTime() + 7 * 864e5);
+  if (periodo === 'quincena'){
+    if (t.getDate() < 16) return new Date(t.getFullYear(), t.getMonth(), 16);
+    return new Date(t.getFullYear(), t.getMonth() + 1, 1);
+  }
+  return new Date(t.getFullYear(), t.getMonth() + 1, t.getDate(), t.getHours());
+}
+function ahorroMeta(g){
+  const extra = Number(g.extra) || 0; // plata metida al sobre directamente
+  if (!g.aporteValor || !g.aporteTipo)
+    return Math.min(Math.round(Math.max(0, ahorroDesde(g.inicio || 0)) + extra), g.objetivo);
+  const ahora = Date.now();
+  let t = new Date(g.inicio || Date.now());
+  let total = extra, periodos = 0;
+  while (periodos < 600){
+    const fin = siguienteCorte(t, g.periodo);
+    if (fin.getTime() > ahora) break; // solo períodos ya completados
+    const bal = Math.max(0, balanceEntre(t.getTime(), fin.getTime()));
+    total += (g.aporteTipo === 'pct') ? bal * g.aporteValor / 100 : Math.min(g.aporteValor, bal);
+    t = fin; periodos++;
+    if (total >= g.objetivo) break;
+  }
+  return Math.min(Math.round(total), g.objetivo);
+}
+function descAporte(g){
+  if (!g.aporteValor || !g.aporteTipo) return 'Balance acumulado desde el inicio';
+  const per = { semana: 'semana', quincena: 'quincena' }[g.periodo] || 'mes';
+  return (g.aporteTipo === 'pct' ? g.aporteValor + '% del balance' : crc(g.aporteValor)) + ' por ' + per;
 }
 function renderMetas(){
   const v = document.getElementById('view-metas');
   if (!data){ v.innerHTML = estadoCarga(); return; }
   const metas = data.metas || [];
-  let html = '';
+  const disp = balanceDisponible();
+  let html = `<div class="card" style="display:flex; justify-content:space-between; align-items:baseline">
+    <div><div style="font-size:13px; color:var(--muted); font-weight:600">Disponible para metas</div>
+    <div style="font-size:12px; color:var(--muted)">balance total − plata ya en sobres</div></div>
+    <div class="num" style="font-size:22px; font-weight:800; color:${disp > 0 ? 'var(--delta-good)' : 'var(--crit)'}">${crc(disp)}</div>
+  </div>`;
+  if (disp <= 0) html += `<div class="banner">⚠ Tu balance disponible es ${crc(disp)}. Para que las metas
+    funcionen necesitás registrar tus ingresos (botón ＋ en Movimientos, o esperá los automáticos).</div>`;
   if (!metas.length) html += `<div class="card"><h3>Metas de ahorro</h3>
     <div class="empty">Definí una meta (ej: “Viaje”, ₡500.000) y la app trackea tu avance con lo que te sobra: ingresos menos gastos desde la fecha de inicio.</div></div>`;
   else metas.forEach((g, idx) => {
-    const ahorro = Math.max(0, ahorroDesde(g.inicio || 0));
+    const ahorro = ahorroMeta(g);
     const pct = Math.min(ahorro / g.objetivo, 1);
     html += `<div class="card goal" onclick="editarMeta(${idx})">
       <div class="top"><span class="nm">🎯 ${esc(g.nombre)}</span><span class="pc num">${Math.round(pct*100)}%</span></div>
       <div class="track"><div class="fill" style="width:${pct*100}%"></div></div>
       <div class="sub num">${crc(ahorro)} de ${crc(g.objetivo)}
         · desde ${new Date(g.inicio).toLocaleDateString('es-CR',{month:'short', year:'numeric'})}</div>
+      <div class="note">💰 ${descAporte(g)}${g.extra > 0 ? ' · incluye ' + crc(g.extra) + ' directos' : ''}</div>
       ${g.nota ? `<div class="note">${esc(g.nota)}</div>` : ''}
     </div>`;
   });
   html += `<button class="btn" onclick="editarMeta(-1)">＋ Nueva meta</button>
-    <div class="banner" style="margin-top:14px">El progreso se calcula como <b>ingresos − gastos</b> acumulados desde la fecha de inicio de la meta.</div>`;
+    <div class="banner" style="margin-top:14px">Cada meta es un "sobre": al cerrar cada semana, quincena o mes, se mete al sobre el aporte
+    que definiste (un monto fijo o un % de lo que te sobró: ingresos − gastos de ese período; nunca más de lo que sobró).
+    También podés meter plata directo al sobre cuando querás, sin esperar el corte.</div>`;
   v.innerHTML = html;
 }
+let metaTipo = 'monto', metaPeriodo = 'mes';
 function editarMeta(idx){
   const g = idx >= 0 ? data.metas[idx] : null;
+  metaTipo = (g && g.aporteTipo) ? g.aporteTipo : 'monto';
+  metaPeriodo = (g && g.periodo) ? g.periodo : 'mes';
   abrirSheet(`
     <h2>${g ? 'Editar' : 'Nueva'} meta</h2>
     <div class="field"><label>Nombre</label><input id="gNom" value="${g ? esc(g.nombre) : ''}" placeholder="Viaje a…"></div>
@@ -909,21 +1060,110 @@ function editarMeta(idx){
       <input id="gObj" type="number" inputmode="numeric" value="${g ? g.objetivo : ''}" placeholder="500000"></div>
     <div class="field"><label>Fecha de inicio</label>
       <input id="gIni" type="date" value="${new Date(g ? g.inicio : Date.now()).toISOString().slice(0,10)}"></div>
+    <div class="field"><label>¿Cuánto se mete al sobre?</label>
+      <div class="seg" id="segTipoMeta">
+        <button style="flex:1" class="${metaTipo==='monto'?'on':''}" onclick="segMeta(this,'tipo','monto')">₡ fijo</button>
+        <button style="flex:1" class="${metaTipo==='pct'?'on':''}" onclick="segMeta(this,'tipo','pct')">% del balance</button>
+      </div></div>
+    <div class="field"><label id="lblValor">${metaTipo==='pct' ? 'Porcentaje (%)' : 'Monto (₡)'}</label>
+      <input id="gValor" type="number" inputmode="numeric" min="0"
+        value="${g && g.aporteValor ? g.aporteValor : ''}" placeholder="${metaTipo==='pct' ? '10' : '25000'}"></div>
+    <div class="field"><label>¿Cada cuánto?</label>
+      <div class="seg" id="segPeriodoMeta">
+        <button style="flex:1" class="${metaPeriodo==='semana'?'on':''}" onclick="segMeta(this,'periodo','semana')">Semana</button>
+        <button style="flex:1" class="${metaPeriodo==='quincena'?'on':''}" onclick="segMeta(this,'periodo','quincena')">Quincena</button>
+        <button style="flex:1" class="${metaPeriodo==='mes'?'on':''}" onclick="segMeta(this,'periodo','mes')">Mes</button>
+      </div></div>
     <div class="field"><label>Nota (opcional)</label><input id="gNota" value="${g ? esc(g.nota||'') : ''}"></div>
     <button class="btn" onclick="guardarMeta(${idx})">Guardar</button>
+    ${g ? `<button class="btn ghost" style="margin-top:10px" onclick="aporteInmediato(${idx})">💰 Meter plata al sobre ahora</button>` : ''}
     ${g ? `<button class="btn danger" style="margin-top:10px" onclick="borrarMeta(${idx})">Eliminar meta</button>` : ''}
   `);
+}
+function segMeta(btn, cual, valor){
+  if (cual === 'tipo'){ metaTipo = valor;
+    document.getElementById('lblValor').textContent = valor === 'pct' ? 'Porcentaje (%)' : 'Monto (₡)';
+    document.getElementById('gValor').placeholder = valor === 'pct' ? '10' : '25000';
+  } else metaPeriodo = valor;
+  btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
 }
 async function guardarMeta(idx){
   const nombre = document.getElementById('gNom').value.trim();
   const objetivo = Number(document.getElementById('gObj').value);
   const inicio = new Date(document.getElementById('gIni').value + 'T00:00:00').getTime();
   const nota = document.getElementById('gNota').value;
+  const valor = Number(document.getElementById('gValor').value) || 0;
   if (!nombre || !objetivo || objetivo <= 0){ toast('Completá nombre y objetivo'); return; }
+  if (metaTipo === 'pct' && valor > 100){ toast('El porcentaje no puede pasar de 100'); return; }
   const items = [...(data.metas || [])];
-  const nueva = { nombre, objetivo, inicio, nota };
+  const nueva = { nombre, objetivo, inicio, nota,
+    aporteTipo: valor > 0 ? metaTipo : '', aporteValor: valor, periodo: metaPeriodo,
+    extra: (idx >= 0 && data.metas[idx].extra) || 0 }; // conserva lo ya metido al sobre
   if (idx >= 0) items[idx] = nueva; else items.push(nueva);
   await persistirMetas(items);
+}
+
+/**
+ * Aporte inmediato: mete plata al sobre YA. No crea transacciones ni toca el
+ * Registro. Solo se puede meter plata que realmente esté disponible:
+ * disponible = balance total (ingresos − gastos) − lo ya reservado en TODOS los sobres.
+ */
+function balanceDisponible(){
+  const reservado = (data.metas || []).reduce((s, m) => s + ahorroMeta(m), 0);
+  return Math.round(ahorroDesde(0) - reservado);
+}
+
+function aporteInmediato(idx){
+  const g = data.metas[idx];
+  if (!g) return;
+  const disponible = balanceDisponible();
+  if (disponible <= 0){
+    toast('Sin balance disponible: registrá tus ingresos primero (tu balance es ' +
+          crc(ahorroDesde(0)) + ' y los sobres ya reservan lo suyo).');
+    return;
+  }
+  const falta = Math.max(0, g.objetivo - ahorroMeta(g));
+  const sugerido = Math.max(0, Math.min(disponible, falta));
+  abrirSheet(`
+    <h2>💰 Meter al sobre "${esc(g.nombre)}"</h2>
+    <div style="font-size:13px; color:var(--ink2); margin:-4px 0 14px" class="num">
+      Disponible (balance − sobres): <b>${crc(disponible)}</b> · A la meta le faltan ${crc(falta)}</div>
+    <div class="field"><label>Monto (₡)</label>
+      <input id="apMonto" type="number" inputmode="numeric" min="1" max="${disponible}"
+        value="${sugerido || ''}" oninput="apVivo(${disponible})"></div>
+    <div id="apInfo" style="font-size:14px; font-weight:600; margin:-2px 0 14px; color:var(--ink2)"></div>
+    <button id="apBtn" class="btn" onclick="confirmarAporte(${idx}, ${disponible})">Meter al sobre</button>
+  `);
+  apVivo(disponible);
+}
+
+/** Actualiza en vivo el % del balance disponible que se está por meter. */
+function apVivo(disponible){
+  const monto = Math.round(Number(document.getElementById('apMonto').value)) || 0;
+  const info = document.getElementById('apInfo');
+  const btn = document.getElementById('apBtn');
+  if (monto <= 0){
+    info.textContent = 'Escribí un monto';
+    info.style.color = 'var(--muted)'; btn.disabled = true;
+  } else if (monto > disponible){
+    info.textContent = '✕ Supera tu disponible (' + crc(disponible) + ')';
+    info.style.color = 'var(--crit)'; btn.disabled = true;
+  } else {
+    const pct = Math.round(monto / disponible * 100);
+    info.textContent = crc(monto) + ' = ' + pct + '% de tu balance disponible';
+    info.style.color = pct >= 90 ? 'var(--serious)' : 'var(--delta-good)';
+    btn.disabled = false;
+  }
+}
+
+async function confirmarAporte(idx, disponible){
+  const g = data.metas[idx];
+  const monto = Math.round(Number(document.getElementById('apMonto').value)) || 0;
+  if (!g || monto <= 0 || monto > disponible) return;
+  const items = [...data.metas];
+  items[idx] = Object.assign({}, g, { extra: (Number(g.extra) || 0) + monto });
+  await persistirMetas(items);
+  toast('✓ ' + crc(monto) + ' al sobre de ' + g.nombre);
 }
 async function borrarMeta(idx){
   const items = (data.metas || []).filter((_, i) => i !== idx);
@@ -958,6 +1198,23 @@ function renderAjustes(){
       <div class="seg">
         ${['auto','light','dark'].map(t => `<button class="${cfg.theme===t?'on':''}" onclick="setTema('${t}')">${{auto:'Auto',light:'Claro',dark:'Oscuro'}[t]}</button>`).join('')}
       </div></div>
+    <div class="setrow"><div><div class="l">Ver montos en</div>
+      <div class="s">Tipo de cambio: ₡${Math.round(tcActual())} por $1</div></div>
+      <div class="seg">
+        <button class="${cfg.moneda!=='USD'?'on':''}" onclick="setMoneda('CRC')">₡ Colones</button>
+        <button class="${cfg.moneda==='USD'?'on':''}" onclick="setMoneda('USD')">$ Dólares</button>
+      </div></div>
+  </div>
+  <div class="card"><h3>Balance real</h3>
+    <div class="setrow" style="border-bottom:none; padding-top:2px"><div class="l">Balance según la app</div>
+      <b class="num" style="font-size:17px">${data ? crc(Math.round(ahorroDesde(0))) : '—'}</b></div>
+    <div class="field"><label>¿Cuánto tenés HOY según tu banco? (₡)</label>
+      <input id="fixSaldo" type="number" inputmode="numeric" placeholder="850000"></div>
+    <button class="btn" onclick="fijarBalance()">Fijar mi balance real</button>
+    <div style="font-size:12px; color:var(--muted); margin-top:10px">
+      Registra un único "ajuste de saldo" por la diferencia. Solo afecta el balance —
+      no toca tus estadísticas de gastos ni de ingresos. Usalo la primera vez y cuando
+      quieras re-sincronizar con tu banco.</div>
   </div>
   <div class="card"><h3>Herramientas</h3>
     <div class="setrow" onclick="exportarCSV()"><div><div class="l">Exportar CSV</div>
@@ -987,6 +1244,19 @@ async function probarConexion(){
     await sync();
   } catch (e) { toast('✕ No conecta: ' + e.message); }
 }
+async function fijarBalance(){
+  const saldo = Math.round(Number(document.getElementById('fixSaldo').value));
+  if (isNaN(saldo)){ toast('Escribí el saldo que muestra tu banco'); return; }
+  try {
+    const r = await api('setBalance', { saldo });
+    if (r.ajuste === 0) toast('✓ Tu balance ya estaba exacto');
+    else toast('✓ Balance fijado en ' + crc(saldo) + ' (ajuste de ' + (r.ajuste > 0 ? '+' : '') + crc(r.ajuste) + ')');
+    await sync();
+    renderAjustes();
+  } catch (e) { toast('✕ ' + e.message); }
+}
+
+function setMoneda(m){ cfg.moneda = m; guardarLS(LS_CFG, cfg); render(); toast(m === 'USD' ? 'Viendo todo en dólares' : 'Viendo todo en colones'); }
 function setTema(t){ cfg.theme = t; guardarLS(LS_CFG, cfg); aplicarTema(); renderAjustes(); }
 function aplicarTema(){
   const oscuro = cfg.theme === 'dark' ||

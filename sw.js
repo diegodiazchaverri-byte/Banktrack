@@ -1,6 +1,6 @@
 /* Service worker: hace la app instalable y deja el "cascarón" disponible offline.
    Si actualizás index.html, subí también este archivo cambiando la VERSION. */
-const VERSION = 'v2';
+const VERSION = 'v7';
 const CACHE = 'finanzas-' + VERSION;
 const SHELL = ['./', './index.html', './manifest.json', './icon.svg'];
 
