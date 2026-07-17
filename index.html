@@ -353,18 +353,21 @@ function listaMeses(){
 // SINCRONIZACIÓN CON EL SHEET
 // ================================================================
 async function api(action, payload){
-  if (demo()) return demoApi(action, payload || {});
-  const res = await fetch(cfg.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight CORS
-    body: JSON.stringify(Object.assign({ token: cfg.token, action }, payload || {}))
-  });
-  const texto = await res.text();
   let json;
-  try { json = JSON.parse(texto); }
-  catch (e) {
-    throw new Error('la URL no devolvió datos. Revisá que la implementación sea ' +
-      '"Aplicación web" con acceso "Cualquier persona" y que la URL termine en /exec');
+  if (demo()){
+    json = demoApi(action, payload || {});
+  } else {
+    const res = await fetch(cfg.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight CORS
+      body: JSON.stringify(Object.assign({ token: cfg.token, action }, payload || {}))
+    });
+    const texto = await res.text();
+    try { json = JSON.parse(texto); }
+    catch (e) {
+      throw new Error('la URL no devolvió datos. Revisá que la implementación sea ' +
+        '"Aplicación web" con acceso "Cualquier persona" y que la URL termine en /exec');
+    }
   }
   if (!json.ok) throw new Error(json.error || 'Error del servidor');
   return json;
@@ -430,6 +433,31 @@ function demoApi(action, p){
       c: 'Ajuste de saldo', cat: 'Otros', m: ajuste, n: '', aj: true });
     guardarLS(LS_DATA, data);
     return { ok:true, ajuste, balance: Math.round(p.saldo) };
+  }
+  if (action === 'deleteTransaction'){
+    // El llamador (eliminarTx) ya sacó la fila de data.tx de forma optimista
+    // ANTES de esta llamada, así que acá no la volvemos a buscar — se arma
+    // el registro de la papelera directo con los datos que mandó el cliente.
+    if (!data.papelera) data.papelera = [];
+    data.papelera.unshift({
+      fila: p.fila, f: p.f, t: p.t || '', c: p.c, cat: p.cat || 'Otros',
+      m: p.m, n: p.n || '', aj: p.aj || undefined, mo: p.mo, m0: p.m0,
+      eliminadoEl: Date.now()
+    });
+    guardarLS(LS_DATA, data);
+    return { ok:true };
+  }
+  if (action === 'getTrash'){
+    return { ok:true, items: data.papelera || [] };
+  }
+  if (action === 'restoreTransaction'){
+    const item = (data.papelera || []).find(x => x.fila === p.fila);
+    if (!item) return { ok:false, error:'No encontré ese elemento en la papelera' };
+    data.papelera.splice(data.papelera.indexOf(item), 1);
+    const { eliminadoEl, ...tx } = item;
+    data.tx.push(tx);
+    guardarLS(LS_DATA, data);
+    return { ok:true };
   }
   if (action === 'ping') return { ok:true, pong:true };
   return { ok:false, error:'demo' };
@@ -545,6 +573,8 @@ function renderInicio(){
   const delta = ant.gastos > 0 ? (t.gastos - ant.gastos) / ant.gastos : null;
   const deltaHtml = delta === null ? '' :
     `<span class="delta ${delta <= 0 ? 'good' : ''}">${delta <= 0 ? '▼' : '▲'} ${Math.abs(Math.round(delta*100))}% vs ${mesNombre(mesAnterior(mesSel), true)}</span>`;
+  // Balance real: acumulado de TODA la vida (incluye ajustes de saldo), no solo el neto del mes
+  const balanceTotal = Math.round(ahorroDesde(0));
 
   v.innerHTML = selectorMes() +
     `<div class="card hero">
@@ -553,7 +583,7 @@ function renderInicio(){
       ${deltaHtml}
       <div class="sub">
         <div>Ingresos<b class="num" style="color:var(--delta-good)">${crc(t.ingresos)}</b></div>
-        <div>Balance<b class="num">${crc(t.ingresos - t.gastos)}</b></div>
+        <div>Balance<b class="num" style="color:${balanceTotal < 0 ? 'var(--crit)' : 'var(--ink)'}">${crc(balanceTotal)}</b></div>
       </div>
     </div>` +
     cardDona() + cardFlujo(t) + cardTendencia() + cardPresupuestosMini() + cardComparativa();
@@ -761,8 +791,8 @@ function renderLista(){
       d.toLocaleDateString('es-CR',{weekday:'long', day:'numeric', month:'short'});
     if (dia !== diaPrev){ html += `<div class="dayhead">${dia}</div>`; diaPrev = dia; }
     if (t.aj){
-      // Ajuste de saldo: visible pero no editable, con su signo
-      html += `<div class="tx" style="opacity:.75">
+      // Ajuste de saldo: no se recategoriza, pero sí se puede eliminar
+      html += `<div class="tx" style="opacity:.75" onclick="abrirAjuste(${t.fila})">
         <div class="ic">⚖️</div>
         <div class="mid"><div class="who">Ajuste de saldo</div>
           <span class="catchip">Solo afecta el balance</span></div>
@@ -800,7 +830,101 @@ function abrirTx(fila){
     ${t.n ? `<div style="color:var(--muted); font-size:13px; margin-bottom:6px">📝 ${esc(t.n)}</div>` : ''}
     <div class="field" style="margin-top:14px"><label>Categoría</label></div>
     <div class="catgrid">${grid}</div>
+    <button class="btn danger" style="margin-top:6px" onclick="confirmarEliminar(${fila})">🗑 Eliminar</button>
   `);
+}
+
+/** Ficha reducida para el ajuste de saldo: no se recategoriza, solo se elimina. */
+function abrirAjuste(fila){
+  const t = txs().find(x => x.fila === fila);
+  if (!t) return;
+  abrirSheet(`
+    <h2>⚖️ Ajuste de saldo</h2>
+    <div style="color:var(--ink2); font-size:14px; margin:-4px 0 16px" class="num">
+      ${t.m >= 0 ? '+' : ''}${crc(t.m)} · ${new Date(t.f).toLocaleDateString('es-CR',{day:'numeric',month:'long',year:'numeric'})}</div>
+    <div style="font-size:13px; color:var(--muted); margin-bottom:16px">
+      Este registro solo existe para cuadrar tu balance con el banco. Eliminarlo
+      resta este monto de tu balance total.</div>
+    <button class="btn danger" onclick="confirmarEliminar(${fila})">🗑 Eliminar ajuste</button>
+  `);
+}
+
+function confirmarEliminar(fila){
+  const t = txs().find(x => x.fila === fila);
+  if (!t) return;
+  const desc = t.aj ? 'este ajuste de saldo' : `"${t.c}" (${crc(t.m)})`;
+  abrirSheet(`
+    <h2>¿Eliminar ${t.aj ? 'el ajuste' : 'esta transacción'}?</h2>
+    <div style="font-size:14px; color:var(--ink2); margin-bottom:18px">
+      Vas a eliminar ${esc(desc)}. Queda guardada en la hoja <b>Papelera</b> de tu
+      Google Sheet por si la necesitás recuperar.</div>
+    <button class="btn danger" onclick="eliminarTx(${fila})">Sí, eliminar</button>
+    <button class="btn ghost" style="margin-top:10px" onclick="${t.aj ? 'abrirAjuste' : 'abrirTx'}(${fila})">Cancelar</button>
+  `);
+}
+
+async function eliminarTx(fila){
+  const t = txs().find(x => x.fila === fila);
+  if (!t) return;
+  cerrarSheet();
+  const idx = data.tx.indexOf(t);
+  data.tx.splice(idx, 1); // optimista
+  render();
+  try {
+    await api('deleteTransaction', { fila: t.fila, f: t.f, c: t.c, m: t.m,
+      cat: t.cat, aj: t.aj, t: t.t, n: t.n, mo: t.mo, m0: t.m0 });
+    guardarLS(LS_DATA, data);
+    toast('🗑 Eliminado');
+  } catch (e) {
+    data.tx.splice(idx, 0, t); // revertir si falla
+    render();
+    toast('✕ No se pudo eliminar: ' + e.message);
+  }
+}
+
+// --- Papelera (Ajustes → Herramientas → Papelera) ---
+async function abrirPapelera(){
+  abrirSheet('<h2>🗑 Papelera</h2><div class="empty">Cargando…</div>');
+  try {
+    const r = await api('getTrash');
+    renderPapelera(r.items || []);
+  } catch (e) {
+    document.getElementById('sheetBody').innerHTML =
+      `<h2>🗑 Papelera</h2><div class="empty">No se pudo cargar: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderPapelera(items){
+  if (!items.length){
+    document.getElementById('sheetBody').innerHTML =
+      '<h2>🗑 Papelera</h2><div class="empty">No hay nada eliminado.</div>';
+    return;
+  }
+  const filas = items.map(it => `
+    <div class="tx" style="opacity:.85">
+      <div class="ic">${it.aj ? '⚖️' : (CAT_EMOJI[it.cat] || '📦')}</div>
+      <div class="mid">
+        <div class="who">${esc(it.c)}</div>
+        <span class="catchip">${esc(it.cat)} · eliminado ${it.eliminadoEl ? new Date(it.eliminadoEl).toLocaleDateString('es-CR',{day:'numeric',month:'short'}) : ''}</span>
+      </div>
+      <div class="amt num">${crc(it.m)}</div>
+    </div>
+    <button class="btn ghost" style="margin:-4px 0 14px" onclick="restaurarDePapelera(${it.fila}, ${it.f}, '${esc(it.c)}', ${it.m})">↩ Restaurar</button>
+  `).join('');
+  document.getElementById('sheetBody').innerHTML =
+    `<h2>🗑 Papelera</h2>
+     <div style="font-size:13px; color:var(--muted); margin:-4px 0 14px">
+       Lo que eliminaste queda acá. Restaurar lo devuelve a Movimientos.</div>
+     ${filas}`;
+}
+
+async function restaurarDePapelera(fila, f, c, m){
+  try {
+    await api('restoreTransaction', { fila, f, c, m });
+    await sync();
+    toast('↩ Restaurado');
+    abrirPapelera(); // refresca la lista dentro del mismo sheet
+  } catch (e) { toast('✕ ' + e.message); }
 }
 
 /** Paso 2: elegir el alcance — solo esta compra, o siempre para este comercio. */
@@ -1221,6 +1345,8 @@ function renderAjustes(){
       <div class="s">Movimientos de ${mesNombre(mesSel).toLowerCase()}</div></div><div>›</div></div>
     <div class="setrow" onclick="sync(true)"><div><div class="l">Recargar datos ahora</div>
       <div class="s">Trae lo último desde el Sheet</div></div><div>›</div></div>
+    <div class="setrow" onclick="abrirPapelera()"><div><div class="l">🗑 Papelera</div>
+      <div class="s">Transacciones eliminadas — se pueden restaurar</div></div><div>›</div></div>
   </div>
   <div class="banner">Los datos viven en tu Google Sheet — la app solo los lee y escribe ahí.
     Alertas de presupuesto y resumen semanal llegan por correo.</div>`;
