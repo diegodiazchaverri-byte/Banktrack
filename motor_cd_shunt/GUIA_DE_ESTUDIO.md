@@ -201,7 +201,7 @@ Pero la carga viscosa **no es de par constante**: crece con la velocidad
 4. **Cierra los lazos:** toda variable que aparece en el lado derecho se "realimenta"
    desde la salida del integrador correspondiente con su ganancia ($R_a$, $K_e$, $B$, $K_t$).
 
-### 5.2 El diagrama (archivo `APELLIDO_NOMBRE.zcos`)
+### 5.2 El diagrama (archivo `Diaz_Diego.zcos`)
 
 ![Diagrama Xcos](figuras/diagrama_xcos.png)
 
@@ -394,8 +394,8 @@ Mismo motor, mismo par de carga (12.53 N·m), $\phi \propto I_f$:
 | Archivo | Qué hace |
 |---|---|
 | `calculos_motor_shunt.sce` | Parte A completa (memoria de cálculo en consola) + simulación con `ode()` + simulación del `.zcos` + gráficas |
-| `generar_xcos.sce` | Construye el diagrama por código y lo guarda como `APELLIDO_NOMBRE.zcos` |
-| `APELLIDO_NOMBRE.zcos` | Diagrama Xcos entregable (renómbralo con tu apellido y nombre) |
+| `generar_xcos.sce` | Construye el diagrama por código y lo guarda como `Diaz_Diego.zcos` (el script de cálculos lo llama solo si hace falta) |
+| `Diaz_Diego.zcos` | Diagrama Xcos entregable; lo crea tu propia versión de Scilab |
 | `figuras/` | Gráficas PNG generadas por el script |
 | `verificacion_python.py` | Verificación independiente (opcional) |
 | `informe/` | Borrador del informe técnico (Markdown → PDF/DOCX) |
@@ -405,8 +405,8 @@ Mismo motor, mismo par de carga (12.53 N·m), $\phi \propto I_f$:
 ```scilab
 exec("generar_xcos.sce", -1)          // solo si quieres regenerar el diagrama
 exec("calculos_motor_shunt.sce", -1)  // cálculos + simulaciones + gráficas
-xcos("APELLIDO_NOMBRE.zcos")          // abrir el diagrama y simular a mano
+xcos("Diaz_Diego.zcos")          // abrir el diagrama y simular a mano
 ```
 
-> Si renombras el `.zcos`, cambia también la variable `archivo_xcos` al inicio de la
-> sección B.2 de `calculos_motor_shunt.sce` (y `archivo` en `generar_xcos.sce`).
+> Los `.zcos` guardados por una versión de Scilab pueden no abrir bien en otra; por eso
+> el diagrama se genera en tu computadora con `generar_xcos.sce`.

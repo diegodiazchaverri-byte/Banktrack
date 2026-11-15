@@ -5,7 +5,8 @@
 //  PARTE A : cálculos analíticos (memoria de cálculo impresa en consola)
 //  PARTE B : simulación dinámica
 //            B.1  integración numérica de las EDO con ode()  (referencia)
-//            B.2  simulación del diagrama Xcos APELLIDO_NOMBRE.zcos
+//            B.2  simulación del diagrama Xcos Diaz_Diego.zcos (se genera
+//                 automáticamente con generar_xcos.sce si no existe)
 //                 (si existe en la misma carpeta) y comparación con B.1
 //            B.3  gráficas ia(t), Tm(t), n(t)  ->  carpeta figuras/
 //            B.4  (extra) transición 1600 -> 1800 rpm en caliente
@@ -196,30 +197,51 @@ for k = 1:nc
 end
 
 // ---------------- B.2  Simulación del diagrama Xcos ----------------
-archivo_xcos = "APELLIDO_NOMBRE.zcos";
+// El diagrama lo construye generar_xcos.sce CON TU PROPIA VERSIÓN de Scilab
+// (los .zcos guardados por otra versión pueden no abrir bien). Si el archivo
+// no existe, o si existe pero falla al simularse, se vuelve a generar.
+archivo_xcos = "Diaz_Diego.zcos";
 hay_xcos = %f;
-if isfile(archivo_xcos) then
-    mprintf("\nB.2) Simulando el diagrama %s con xcos_simulate...\n", archivo_xcos);
-    loadXcosLibs(); loadScicos();
-    importXcosDiagram(archivo_xcos);
-    ctx0 = scs_m.props.context;
-    XIA = zeros(length(t), nc); XTM = XIA; XNR = XIA;
-    for k = 1:nc
-        ctx = ctx0;
-        i = grep(ctx, "/^Rf\s*=/", "r");  ctx(i) = msprintf("Rf = %.10g;", casos(k,1));
-        i = grep(ctx, "/^TL\s*=/", "r");  ctx(i) = msprintf("TL = %.10g;", casos(k,3));
-        scs_m.props.context = ctx;
-        scs_m.props.tf = tf;
-        ventanas = winsid();
-        xcos_simulate(scs_m, 4);               // deja la variable "res" (bloque To workspace)
-        nuevas = setdiff(winsid(), ventanas);  // cerrar el osciloscopio del diagrama
-        if nuevas <> [] then close(nuevas); end
-        // res.time = 0, dt, ..., tf-dt  ->  interpolar sobre t
-        XIA(:,k) = interp1(res.time, res.values(:,1), t, "linear", "extrap");
-        XTM(:,k) = interp1(res.time, res.values(:,2), t, "linear", "extrap");
-        XNR(:,k) = interp1(res.time, res.values(:,3), t, "linear", "extrap");
+hay_generador = isfile("generar_xcos.sce");
+if ~isfile(archivo_xcos) & hay_generador then
+    mprintf("\nB.2) No existe %s: generandolo con tu version de Scilab...\n", archivo_xcos);
+    exec("generar_xcos.sce", -1);
+end
+intento = 0;
+while isfile(archivo_xcos) & ~hay_xcos & intento < 2
+    intento = intento + 1;
+    try
+        mprintf("\nB.2) Simulando el diagrama %s con xcos_simulate...\n", archivo_xcos);
+        loadXcosLibs(); loadScicos();
+        importXcosDiagram(archivo_xcos);
+        ctx0 = scs_m.props.context;
+        XIA = zeros(length(t), nc); XTM = XIA; XNR = XIA;
+        for k = 1:nc
+            ctx = ctx0;
+            i = grep(ctx, "/^Rf\s*=/", "r");  ctx(i) = msprintf("Rf = %.10g;", casos(k,1));
+            i = grep(ctx, "/^TL\s*=/", "r");  ctx(i) = msprintf("TL = %.10g;", casos(k,3));
+            scs_m.props.context = ctx;
+            scs_m.props.tf = tf;
+            ventanas = winsid();
+            xcos_simulate(scs_m, 4);               // deja la variable "res" (bloque To workspace)
+            nuevas = setdiff(winsid(), ventanas);  // cerrar el osciloscopio del diagrama
+            if nuevas <> [] then close(nuevas); end
+            // res.time = 0, dt, ..., tf-dt  ->  interpolar sobre t
+            XIA(:,k) = interp1(res.time, res.values(:,1), t, "linear", "extrap");
+            XTM(:,k) = interp1(res.time, res.values(:,2), t, "linear", "extrap");
+            XNR(:,k) = interp1(res.time, res.values(:,3), t, "linear", "extrap");
+        end
+        hay_xcos = %t;
+    catch
+        mprintf("   Aviso: no se pudo simular %s:\n   %s\n", archivo_xcos, strcat(lasterror(), " "));
+        if intento == 1 & hay_generador then
+            mprintf("   -> Se vuelve a generar el diagrama con tu version de Scilab y se reintenta.\n");
+            exec("generar_xcos.sce", -1);
+        end
     end
-    hay_xcos = %t;
+end
+
+if hay_xcos then
     mprintf("   %-40s %14s %14s %14s\n", "Caso", "max|dia| [A]", "max|dTm| [Nm]", "max|dn| [rpm]");
     for k = 1:nc
         mprintf("   %-40s %14.2e %14.2e %14.2e\n", nombres(k), max(abs(XIA(:,k) - IA(:,k))), ..
@@ -229,8 +251,8 @@ if isfile(archivo_xcos) then
     // Para las gráficas se usan los datos del diagrama Xcos
     GIA = XIA; GTM = XTM; GNR = XNR; fuente = "Xcos";
 else
-    mprintf("\nB.2) No se encontro %s: se grafican los resultados de ode().\n", archivo_xcos);
-    mprintf("     (Genere el diagrama con exec(""generar_xcos.sce"", -1))\n");
+    mprintf("\nB.2) No se pudo usar %s: se grafican los resultados de ode().\n", archivo_xcos);
+    mprintf("     (Pon generar_xcos.sce en esta misma carpeta y vuelve a ejecutar)\n");
     GIA = IA; GTM = TM; GNR = NR; fuente = "ode()";
 end
 

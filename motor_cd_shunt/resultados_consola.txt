@@ -60,7 +60,7 @@ B.1) Resultados de ode() (t = 0 .. 20 s, condiciones iniciales nulas)
    Rf'=136.63 (1800 rpm), Caso A TL=0         122.61    1.11    2112.3     18.7     6.78   24.1288   1779.45
    Rf'=136.63 (1800 rpm), Caso B TL=5         126.93    1.15    2036.7     18.7     6.81   31.8931   1715.44
 
-B.2) Simulando el diagrama APELLIDO_NOMBRE.zcos con xcos_simulate...
+B.2) Simulando el diagrama Diaz_Diego.zcos con xcos_simulate...
    Caso                                       max|dia| [A]  max|dTm| [Nm]  max|dn| [rpm]
    Rf=120 (1600 rpm), Caso A TL=0                 4.06e-04       2.68e-04       3.98e-03
    Rf=120 (1600 rpm), Caso B TL=5                 4.10e-04       2.71e-04       4.08e-03

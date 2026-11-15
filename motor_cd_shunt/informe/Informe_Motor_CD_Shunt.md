@@ -1,7 +1,7 @@
 ---
 title: "Control de velocidad de un motor de CD Shunt mediante el flujo de campo"
 subtitle: "Modelado, cálculo analítico y simulación dinámica en Scilab/Xcos"
-author: "APELLIDO, NOMBRE — Carné/ID — Curso"
+author: "Díaz, Diego — Carné/ID — Curso"
 date: "Fecha de entrega"
 lang: es
 ---
@@ -89,7 +89,7 @@ se requeriría $R_f = 138.61\ \Omega$.
 
 $$L_a\frac{di_a}{dt} = V_a - R_ai_a - K_e\omega \qquad\qquad J\frac{d\omega}{dt} = K_ti_a - B\omega - T_L$$
 
-![Diagrama de bloques del motor CD shunt en Xcos (archivo APELLIDO_NOMBRE.zcos).](../figuras/diagrama_xcos.png)
+![Diagrama de bloques del motor CD shunt en Xcos (archivo Diaz_Diego.zcos).](../figuras/diagrama_xcos.png)
 
 Cada ecuación se implementa despejando la derivada e integrándola: el primer lazo
 (sumador $[+,-,-]$, ganancia $1/L_a$, integrador) produce $i_a$; la ganancia $K_t$ genera el
@@ -165,4 +165,4 @@ campo debilitado tiene peor regulación de velocidad.
 
 - `calculos_motor_shunt.sce`: memoria de cálculo, simulación con `ode()` y del diagrama Xcos, gráficas.
 - `generar_xcos.sce`: generación programática del diagrama.
-- `APELLIDO_NOMBRE.zcos`: diagrama de bloques en Xcos.
+- `Diaz_Diego.zcos`: diagrama de bloques en Xcos.

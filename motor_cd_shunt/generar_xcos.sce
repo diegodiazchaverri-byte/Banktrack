@@ -1,7 +1,7 @@
 // =====================================================================
 //  generar_xcos.sce
 //  Construye por código el diagrama de bloques del motor CD Shunt y lo
-//  guarda como APELLIDO_NOMBRE.zcos (renómbralo con tus datos).
+//  guarda como Diaz_Diego.zcos.
 //
 //  Ecuaciones implementadas (dominio del tiempo):
 //     La * dia/dt = Va - Ra*ia - Ke*w          (malla de armadura)
@@ -15,9 +15,10 @@
 //
 //  Uso:  exec("generar_xcos.sce", -1)   (desde la carpeta del archivo)
 // =====================================================================
+funcprot(0);   // permite re-ejecutar el script sin avisos de funciones redefinidas
 loadXcosLibs(); loadScicos();
 
-archivo = "APELLIDO_NOMBRE.zcos";
+archivo = "Diaz_Diego.zcos";
 
 // ---------------- Contexto del diagrama (parámetros) -----------------
 ctx = [
@@ -87,7 +88,7 @@ endfunction
 
 // ---------------- Bloques ----------------
 scs_m = scicos_diagram();
-scs_m.props.title   = "Motor_CD_Shunt_control_por_campo";
+scs_m.props.title   = "Diaz_Diego";
 scs_m.props.tf      = 20;
 scs_m.props.context = ctx;
 // [atol rtol ttol deltat scale solver hmax]; solver 0 = LSodar
