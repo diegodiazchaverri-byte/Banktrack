@@ -1,0 +1,47 @@
+--- PARTE A ---
+
+A.1) n1 = 1600 rpm, w1 = 167.5516 rad/s
+   If = 1.0000 A
+   Ia = 19.0000 A
+   Ea = 110.5000 V
+   Ke = 0.659498 V.s/rad
+   Kt = 0.659498 N.m/A
+   T = 12.5305 N.m   (Ea*Ia = 2099.50 W, T*w1 = 2099.50 W)
+
+A.2) n2 = 1800 rpm, w2 = 188.4956 rad/s
+   188.4956*Ke2^2 - 120*Ke2 + 6.2652 = 0
+   raices: 0.579237 (Ia = 21.633 A)  y  0.057383 (Ia = 218.367 A, se descarta)
+   Ke2 = 0.579237
+   Ia2 = 21.6327 A
+   Ea2 = 109.1836 V
+   If2 = 0.87830 A
+   Rf' = 136.6276 Ohm
+   IL2 = 22.5110 A
+
+A.3) Estado estable
+   Caso                                      w [rad/s]    n [rpm]     ia [A]   Tm [N.m]
+   Rf=120 (1600 rpm), Caso A TL=0             167.5136    1599.64    19.0501    12.5635
+   Rf=120 (1600 rpm), Caso B TL=5             162.2219    1549.11    26.0299    17.1666
+   Rf'=136.63 (1800 rpm), Caso A TL=0         186.3419    1779.43    24.1277    13.9756
+   Rf'=136.63 (1800 rpm), Caso B TL=5         179.6398    1715.43    31.8919    18.4730
+   nota: con TL=0 da 1779.4 rpm y no 1800 porque B*w crece con la velocidad
+
+--- PARTE B ---
+
+B.1) ode()
+   Caso                                       ia_max  t_pico     n_max     Mp_n   ts(2%)    ia(tf)     n(tf)
+   Rf=120 (1600 rpm), Caso A TL=0             113.57    1.00    1976.1     23.5     6.12   19.0496   1599.62
+   Rf=120 (1600 rpm), Caso B TL=5             117.65    1.03    1914.0     23.6     6.15   26.0293   1549.09
+   Rf'=136.63 (1800 rpm), Caso A TL=0         122.61    1.11    2112.3     18.7     6.78   24.1288   1779.45
+   Rf'=136.63 (1800 rpm), Caso B TL=5         126.93    1.15    2036.7     18.7     6.81   31.8931   1715.44
+
+Diagrama guardado en: Diaz_Diego.zcos
+
+B.2) Xcos: Diaz_Diego.zcos
+   diferencia xcos vs ode:
+   Caso                                       max|dia| [A]  max|dTm| [Nm]  max|dn| [rpm]
+   Rf=120 (1600 rpm), Caso A TL=0                 4.06e-04       2.68e-04       3.98e-03
+   Rf=120 (1600 rpm), Caso B TL=5                 4.10e-04       2.70e-04       4.08e-03
+   Rf'=136.63 (1800 rpm), Caso A TL=0             3.98e-04       2.30e-04       3.58e-03
+   Rf'=136.63 (1800 rpm), Caso B TL=5             4.18e-04       2.42e-04       3.75e-03
+
