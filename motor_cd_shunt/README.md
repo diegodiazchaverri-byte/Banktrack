@@ -3,10 +3,10 @@
 | Archivo | Contenido |
 |---|---|
 | [`GUIA_DE_ESTUDIO.md`](GUIA_DE_ESTUDIO.md) | **Empieza aquí.** Explicación pedagógica completa, receta para exámenes y ejercicios |
-| `calculos_motor_shunt.sce` | Parte A (memoria de cálculo) + Parte B (ode, simulación del .zcos, gráficas) |
+| `calculos_motor_shunt.sce` | Parte A + Parte B (ode, simulación del .zcos y las 2 gráficas). Crea `Diaz_Diego.zcos` si no existe |
 | `generar_xcos.sce` | Construye el diagrama de bloques por código |
 | `Diaz_Diego.zcos` | Diagrama Xcos entregable. **No viene descargado:** lo crea tu Scilab al ejecutar `calculos_motor_shunt.sce` (así es compatible con tu versión) |
-| `informe/` | Borrador del informe: `.md` (fuente), `.pdf`, `.docx` (editable en Word) |
+| `informe/Diaz_Diego_Informe.docx` | Informe final en Word (pasar a PDF para entregar) |
 | `figuras/` | Gráficas y captura del diagrama |
 | `resultados_consola.txt` | Salida completa del script de Scilab |
 | `verificacion_python.py` | Verificación independiente con SciPy |
